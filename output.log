@@ -1,0 +1,17 @@
+==== Compilando o Banco de Dados ====
+
+==== Compilacao Finzalizada ====
+Iniciando o Servidor de background e aguardando 1 segundo...
+
+Iniciando o Cliente...
+[Cliente] Iniciando cliente. Conectando no Servidor via PIPE...
+[Cliente] Nao achei o pipe do servidor. Ele ta rodando?
+
+
+===== BANCO DE DADOS (Persistencia TXT) =====
+ID: 1 | NOME: Alice
+ID: 3 | NOME: Carlos Magno
+ID: 4 | NOME: Diego
+ID: 5 | NOME: Eduardo
+=============================================
+Pressione qualquer tecla para continuar. . . 

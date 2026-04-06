@@ -1,0 +1,31 @@
+[Cliente] Iniciando cliente. Conectando no Servidor via PIPE...
+[Cliente] Conectado e pronto. Disparando os testes!
+
+[Cliente] Solicitando: INSERT ID 1
+[Cliente] Solicitando: INSERT ID 2
+[Cliente] Solicitando: INSERT ID 3
+[Cliente] Solicitando: INSERT ID 4
+[Cliente] Solicitando: INSERT ID 5
+[Cliente] Solicitando: SELECT ID 1
+[Cliente] Solicitando: SELECT ID 90
+[Cliente] Solicitando: UPDATE ID 3
+[Cliente] Solicitando: SELECT ID 3
+[Cliente] Solicitando: DELETE ID 2
+[Cliente] Solicitando: SELECT ID 2
+[Cliente] Solicitando: INSERT ID 1
+
+[Cliente] ==== Lendo as Respostas! ====
+ <- [INSERT] ID 1 inserido com sucesso ('Alice').
+ <- [INSERT] ID 2 inserido com sucesso ('Bruno').
+ <- [INSERT] ID 3 inserido com sucesso ('Carlos').
+ <- [INSERT] ID 4 inserido com sucesso ('Diego').
+ <- [INSERT] ID 5 inserido com sucesso ('Eduardo').
+ <- [SELECT] Encontrado: ID=1, Nome='Alice'
+ <- [DELETE] ID 2 removido.
+ <- [UPDATE] ID 3 atualizado para 'Carlos Magno'.
+ <- [SELECT] Encontrado: ID=3, Nome='Carlos Magno'
+ <- [ERRO] ID 90 nao encontrado no banco.
+ <- [ERRO] ID 2 nao encontrado no banco.
+ <- [ERRO] Ja existe registro com ID 1.
+
+[Cliente] Finalizado!
