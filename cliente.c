@@ -23,6 +23,11 @@ Requisicao criar_update(int id, const char* novo_nome) {
     return r;
 }
 
+Requisicao criar_list() {
+    Requisicao r = {OP_LIST, 0, ""};
+    return r;
+}
+
 // Funcao auxiliar para mandar
 void envia_pro_servidor(
 #ifdef _WIN32
@@ -47,7 +52,6 @@ int main() {
     printf("[Cliente] Iniciando cliente. Conectando no Servidor via PIPE...\n");
 
 #ifdef _WIN32
-    // Windows - abrimos arquivo comendo nome do Pipe como se fosse arquivo
     HANDLE hPipeReq = CreateFileA(NOME_PIPE_REQ, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
     HANDLE hPipeResp = CreateFileA(NOME_PIPE_RESP, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
     
@@ -65,52 +69,96 @@ int main() {
     }
 #endif
 
-    printf("[Cliente] Conectado e pronto. Disparando os testes!\n\n");
+    printf("[Cliente] Conectado e pronto. Entrando no modo interativo!\n\n");
 
-    // Lote de testes (bem misturado para testar se funciona mesmo nas threads)
-    Requisicao testes[] = {
-        criar_insert(1, "Alice"),
-        criar_insert(2, "Bruno"),
-        criar_insert(3, "Carlos"),
-        criar_insert(4, "Diego"),
-        criar_insert(5, "Eduardo"),
-        criar_select(1),
-        criar_select(90),     // Nao deve achar nada
-        criar_update(3, "Carlos Magno"),
-        criar_select(3),      // Deve ver alterado
-        criar_delete(2),
-        criar_select(2),      // Removido
-        criar_insert(1, "Erro Duplicado") // Deve rejeitar
-    };
-    
-    int quantidade = sizeof(testes)/sizeof(Requisicao);
-
-    // Enviar todas em sequencia
-    char msg[100];
-    for (int i=0; i<quantidade; i++) {
-        if (testes[i].tipo == OP_INSERT) sprintf(msg, "INSERT ID %d", testes[i].id);
-        else if (testes[i].tipo == OP_SELECT) sprintf(msg, "SELECT ID %d", testes[i].id);
-        else if (testes[i].tipo == OP_UPDATE) sprintf(msg, "UPDATE ID %d", testes[i].id);
-        else if (testes[i].tipo == OP_DELETE) sprintf(msg, "DELETE ID %d", testes[i].id);
+    while (1) {
+        int opcao = -1;
+        printf("\n================ OPTIONS ================\n");
+        printf("1. INSERT (Criar novo registro)\n");
+        printf("2. SELECT (Buscar registro por ID)\n");
+        printf("3. UPDATE (Atualizar nome do registro)\n");
+        printf("4. DELETE (Remover registro por ID)\n");
+        printf("5. LIST (Mostrar todos os registros)\n");
+        printf("0. SAIR\n");
+        printf("=========================================\n");
+        printf("Escolha uma operacao: ");
         
-#ifdef _WIN32
-        envia_pro_servidor(hPipeReq, testes[i], msg);
-#else
-        envia_pro_servidor(fd_req, testes[i], msg);
-#endif
-    }
+        if (scanf("%d", &opcao) != 1) {
+            // Limpa o buffer em caso de entrada errada
+            int c;
+            while ((c = getchar()) != '\n' && c != EOF) {}
+            continue;
+        }
 
-    printf("\n[Cliente] ==== Lendo as Respostas! ====\n");
-    Resposta resp;
-    for (int i=0; i<quantidade; i++) {
+        if (opcao == 0) {
+            break;
+        }
+
+        Requisicao req;
+        char msg[100];
+        
+        if (opcao == 1) { // INSERT
+            int id;
+            char nome[MAX_NOME];
+            printf("Digite o ID: ");
+            scanf("%d", &id);
+            printf("Digite o Nome: ");
+            scanf(" %[^\n]s", nome);
+            req = criar_insert(id, nome);
+            sprintf(msg, "INSERT ID %d '%s'", id, nome);
+        }
+        else if (opcao == 2) { // SELECT
+            int id;
+            printf("Digite o ID para buscar: ");
+            scanf("%d", &id);
+            req = criar_select(id);
+            sprintf(msg, "SELECT ID %d", id);
+        }
+        else if (opcao == 3) { // UPDATE
+            int id;
+            char novo_nome[MAX_NOME];
+            printf("Digite o ID para atualizar: ");
+            scanf("%d", &id);
+            printf("Digite o Novo Nome: ");
+            scanf(" %[^\n]s", novo_nome);
+            req = criar_update(id, novo_nome);
+            sprintf(msg, "UPDATE ID %d '%s'", id, novo_nome);
+        }
+        else if (opcao == 4) { // DELETE
+            int id;
+            printf("Digite o ID para remover: ");
+            scanf("%d", &id);
+            req = criar_delete(id);
+            sprintf(msg, "DELETE ID %d", id);
+        }
+        else if (opcao == 5) { // LIST
+            req = criar_list();
+            sprintf(msg, "LIST");
+        }
+        else {
+            printf("[Erro] Opcao invalida. Tente novamente.\n");
+            continue;
+        }
+
+#ifdef _WIN32
+        envia_pro_servidor(hPipeReq, req, msg);
+#else
+        envia_pro_servidor(fd_req, req, msg);
+#endif
+
+        Resposta resp;
 #ifdef _WIN32
         DWORD lidos;
         if (ReadFile(hPipeResp, &resp, sizeof(Resposta), &lidos, NULL) && lidos > 0) {
             printf(" <- %s\n", resp.mensagem);
+        } else {
+            printf(" [!] Erro ao ler resposta do servidor.\n");
         }
 #else
         if (read(fd_resp, &resp, sizeof(Resposta)) > 0) {
             printf(" <- %s\n", resp.mensagem);
+        } else {
+            printf(" [!] Erro ao ler resposta do servidor.\n");
         }
 #endif
     }

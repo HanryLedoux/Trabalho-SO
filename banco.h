@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <time.h>
 
 #ifdef _WIN32
@@ -15,8 +17,6 @@
     #include <unistd.h>
     #include <fcntl.h>
     #include <sys/stat.h>
-    #include <pthread.h>
-    #include <semaphore.h>
     // Nomes dos PIPES no Linux (FIFOs criados no /tmp)
     #define NOME_PIPE_REQ   "/tmp/banco_req"
     #define NOME_PIPE_RESP  "/tmp/banco_resp"
@@ -40,6 +40,7 @@ typedef enum {
     OP_SELECT,
     OP_DELETE,
     OP_UPDATE,
+    OP_LIST,
     OP_FIM  // Finaliza o servidor
 } TipoOperacao;
 
@@ -53,7 +54,7 @@ typedef struct {
 // Estrutura retornada do Servidor para o Cliente (pelo Pipe Resp)
 typedef struct {
     int id;
-    char mensagem[256];
+    char mensagem[10240]; // Aumento de memoria para comportar toda a lista
 } Resposta;
 
 #endif // BANCO_H
