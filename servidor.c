@@ -1,49 +1,13 @@
 #include "banco.h"
 
-// Definicao das Macros Abstratas para Threads Nativas / POSIX
-#ifdef _WIN32
-  #include <windows.h>
-  typedef HANDLE MY_MUTEX_T;
-  typedef HANDLE MY_SEM_T;
-  typedef HANDLE MY_THREAD_T;
-  #define MUTEX_INIT(m) do { (m) = CreateMutex(NULL, FALSE, NULL); } while(0)
-  #define MUTEX_LOCK(m) WaitForSingleObject((m), INFINITE)
-  #define MUTEX_UNLOCK(m) ReleaseMutex(m)
-  
-  #define SEM_INIT(s, val) do { (s) = CreateSemaphore(NULL, (val), 999999, NULL); } while(0)
-  #define SEM_WAIT(s) WaitForSingleObject((s), INFINITE)
-  #define SEM_POST(s) ReleaseSemaphore((s), 1, NULL)
-  
-  #define THREAD_CREATE(t, func, arg) do { \
-      (t) = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(func), (LPVOID)(arg), 0, NULL); \
-  } while(0)
-  #define THREAD_JOIN(t) do { WaitForSingleObject((t), INFINITE); CloseHandle(t); } while(0)
-  #define THREAD_RET DWORD WINAPI
-#else
-  typedef pthread_mutex_t MY_MUTEX_T;
-  typedef sem_t MY_SEM_T;
-  typedef pthread_t MY_THREAD_T;
-  #define MUTEX_INIT(m) pthread_mutex_init(&(m), NULL)
-  #define MUTEX_LOCK(m) pthread_mutex_lock(&(m))
-  #define MUTEX_UNLOCK(m) pthread_mutex_unlock(&(m))
-  
-  #define SEM_INIT(s, val) sem_init(&(s), 0, (val))
-  #define SEM_WAIT(s) sem_wait(&(s))
-  #define SEM_POST(s) sem_post(&(s))
-  
-  #define THREAD_CREATE(t, func, arg) pthread_create(&(t), NULL, (func), (arg))
-  #define THREAD_JOIN(t) pthread_join((t), NULL)
-  #define THREAD_RET void*
-#endif
-
 // --- Banco de dados em memoria ---
 Registro tabela[MAX_REGISTROS];
 int total_registros = 0;
 
 // Mutex basico para garantir exclusao mutua ao mexer no "banco"
-MY_MUTEX_T mutex_banco;
+pthread_mutex_t mutex_banco = PTHREAD_MUTEX_INITIALIZER;
 // Mutex para evitar que as threads mandem mensagens ao mesmo tempo e embaralhem o Pipe de resposta
-MY_MUTEX_T mutex_resp;
+pthread_mutex_t mutex_resp = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef _WIN32
 HANDLE pipe_resp_global; // Referencia global para poder enviar as respostas
@@ -57,9 +21,9 @@ int pipe_resp_global;
 typedef struct {
     Requisicao reqs[MAX_FILA];
     int inicio, fim, tamanho;
-    MY_MUTEX_T mutex_fila;
-    MY_SEM_T sem_tem_itens; // Quantos itens tem disponiveis pra pegar na fila
-    MY_SEM_T sem_tem_espaco; // Quanto espaco resta na fila
+    pthread_mutex_t mutex_fila;
+    sem_t sem_tem_itens; // Quantos itens tem disponiveis pra pegar na fila
+    sem_t sem_tem_espaco; // Quanto espaco resta na fila
 } FilaTrabalho;
 
 FilaTrabalho fila_pool;
@@ -68,33 +32,33 @@ void inicializa_fila() {
     fila_pool.inicio = 0;
     fila_pool.fim = 0;
     fila_pool.tamanho = 0;
-    MUTEX_INIT(fila_pool.mutex_fila);
-    SEM_INIT(fila_pool.sem_tem_itens, 0); // Começa vazio
-    SEM_INIT(fila_pool.sem_tem_espaco, MAX_FILA); // Comeca com todo espaco livre
+    pthread_mutex_init(&fila_pool.mutex_fila, NULL);
+    sem_init(&fila_pool.sem_tem_itens, 0, 0); // Começa vazio
+    sem_init(&fila_pool.sem_tem_espaco, 0, MAX_FILA); // Comeca com todo espaco livre
 }
 
 void insere_fila(Requisicao r) {
-    SEM_WAIT(fila_pool.sem_tem_espaco); // Espera ter espaco
-    MUTEX_LOCK(fila_pool.mutex_fila); // Trava pra manipular o vetor
+    sem_wait(&fila_pool.sem_tem_espaco); // Espera ter espaco
+    pthread_mutex_lock(&fila_pool.mutex_fila); // Trava pra manipular o vetor
     
     fila_pool.reqs[fila_pool.fim] = r;
     fila_pool.fim = (fila_pool.fim + 1) % MAX_FILA;
     fila_pool.tamanho++;
     
-    MUTEX_UNLOCK(fila_pool.mutex_fila);
-    SEM_POST(fila_pool.sem_tem_itens); // Avisa que tem item novo disponivel
+    pthread_mutex_unlock(&fila_pool.mutex_fila);
+    sem_post(&fila_pool.sem_tem_itens); // Avisa que tem item novo disponivel
 }
 
 Requisicao retira_fila() {
-    SEM_WAIT(fila_pool.sem_tem_itens); // Fica dormindo ate ter algo
-    MUTEX_LOCK(fila_pool.mutex_fila);
+    sem_wait(&fila_pool.sem_tem_itens); // Fica dormindo ate ter algo
+    pthread_mutex_lock(&fila_pool.mutex_fila);
     
     Requisicao r = fila_pool.reqs[fila_pool.inicio];
     fila_pool.inicio = (fila_pool.inicio + 1) % MAX_FILA;
     fila_pool.tamanho--;
     
-    MUTEX_UNLOCK(fila_pool.mutex_fila);
-    SEM_POST(fila_pool.sem_tem_espaco); // Libera espaco
+    pthread_mutex_unlock(&fila_pool.mutex_fila);
+    sem_post(&fila_pool.sem_tem_espaco); // Libera espaco
     
     return r;
 }
@@ -113,25 +77,25 @@ void salvar_txt() {
 
 // Funcoes de resposta pelo pipe
 void envia_resposta(Resposta resp) {
-    MUTEX_LOCK(mutex_resp);
+    pthread_mutex_lock(&mutex_resp);
 #ifdef _WIN32
     DWORD escritos;
     WriteFile(pipe_resp_global, &resp, sizeof(Resposta), &escritos, NULL);
 #else
     write(pipe_resp_global, &resp, sizeof(Resposta));
 #endif
-    MUTEX_UNLOCK(mutex_resp);
+    pthread_mutex_unlock(&mutex_resp);
 }
 
 // --- Operacoes do Banco ---
 void executar_insert(Requisicao r, Resposta *resp) {
-    MUTEX_LOCK(mutex_banco); // EXCLUSAO MUTUA
+    pthread_mutex_lock(&mutex_banco); // EXCLUSAO MUTUA
 
     // Busca duplicado primeiro
     for (int i = 0; i < total_registros; i++) {
         if (tabela[i].ativo && tabela[i].id == r.id) {
             sprintf(resp->mensagem, "[ERRO] Ja existe registro com ID %d.", r.id);
-            MUTEX_UNLOCK(mutex_banco);
+            pthread_mutex_unlock(&mutex_banco);
             return;
         }
     }
@@ -147,11 +111,11 @@ void executar_insert(Requisicao r, Resposta *resp) {
         salvar_txt();
     }
 
-    MUTEX_UNLOCK(mutex_banco);
+    pthread_mutex_unlock(&mutex_banco);
 }
 
 void executar_select(Requisicao r, Resposta *resp) {
-    MUTEX_LOCK(mutex_banco);
+    pthread_mutex_lock(&mutex_banco);
     
     int achou = 0;
     for (int i = 0; i < total_registros; i++) {
@@ -163,11 +127,11 @@ void executar_select(Requisicao r, Resposta *resp) {
     }
     if (!achou) sprintf(resp->mensagem, "[ERRO] ID %d nao encontrado no banco.", r.id);
 
-    MUTEX_UNLOCK(mutex_banco);
+    pthread_mutex_unlock(&mutex_banco);
 }
 
 void executar_delete(Requisicao r, Resposta *resp) {
-    MUTEX_LOCK(mutex_banco);
+    pthread_mutex_lock(&mutex_banco);
     
     int achou = 0;
     for (int i = 0; i < total_registros; i++) {
@@ -181,11 +145,11 @@ void executar_delete(Requisicao r, Resposta *resp) {
     }
     if (!achou) sprintf(resp->mensagem, "[ERRO] ID %d nao encontrado para remocao.", r.id);
 
-    MUTEX_UNLOCK(mutex_banco);
+    pthread_mutex_unlock(&mutex_banco);
 }
 
 void executar_update(Requisicao r, Resposta *resp) {
-    MUTEX_LOCK(mutex_banco);
+    pthread_mutex_lock(&mutex_banco);
     
     int achou = 0;
     for (int i = 0; i < total_registros; i++) {
@@ -199,12 +163,32 @@ void executar_update(Requisicao r, Resposta *resp) {
     }
     if (!achou) sprintf(resp->mensagem, "[ERRO] ID %d nao encontrado para atualizacao.", r.id);
 
-    MUTEX_UNLOCK(mutex_banco);
+    pthread_mutex_unlock(&mutex_banco);
 }
 
+void executar_list(Requisicao r, Resposta *resp) {
+    pthread_mutex_lock(&mutex_banco);
+    
+    strcpy(resp->mensagem, "[LIST] Registros Ativos:\n");
+    int count = 0;
+    for (int i = 0; i < total_registros; i++) {
+        if (tabela[i].ativo) {
+            char linha[100];
+            sprintf(linha, "  -> ID: %d | Nome: '%s'\n", tabela[i].id, tabela[i].nome);
+            strcat(resp->mensagem, linha);
+            count++;
+        }
+    }
+    
+    if (count == 0) {
+        strcpy(resp->mensagem, "[LIST] O banco de dados esta vazio.");
+    }
+    
+    pthread_mutex_unlock(&mutex_banco);
+}
 
 // --- Funcao que as threads executam ---
-THREAD_RET thread_trabalhadora(void* arg) {
+void* thread_trabalhadora(void* arg) {
     long id_thread = (long)arg;
     while(1) {
         Requisicao req = retira_fila(); // Bloqueia esperando trabalho
@@ -224,26 +208,24 @@ THREAD_RET thread_trabalhadora(void* arg) {
         else if(req.tipo == OP_SELECT) executar_select(req, &resp);
         else if(req.tipo == OP_DELETE) executar_delete(req, &resp);
         else if(req.tipo == OP_UPDATE) executar_update(req, &resp);
+        else if(req.tipo == OP_LIST) executar_list(req, &resp);
         else sprintf(resp.mensagem, "[ERRO] Operacao invalida");
 
         // Envia resposta pelo PIPE pro cliente
         envia_resposta(resp);
     }
-    return 0;
+    return NULL;
 }
 
 int main() {
     printf("[Servidor] Iniciando o Servidor de Base de Dados (via Threads e Pipes)...\n");
 
-    MUTEX_INIT(mutex_banco);
-    MUTEX_INIT(mutex_resp);
-
     inicializa_fila();
 
     // Criando as threads do Pool
-    MY_THREAD_T pool[NUM_THREADS];
+    pthread_t pool[NUM_THREADS];
     for(long i=0; i<NUM_THREADS; i++) {
-        THREAD_CREATE(pool[i], thread_trabalhadora, (void*)i);
+        pthread_create(&pool[i], NULL, thread_trabalhadora, (void*)i);
     }
 
 #ifdef _WIN32
@@ -305,7 +287,7 @@ int main() {
 
     // Esperando as threads irem pra casa
     for(int i=0; i<NUM_THREADS; i++) {
-        THREAD_JOIN(pool[i]);
+        pthread_join(pool[i], NULL);
     }
 
 #ifdef _WIN32
